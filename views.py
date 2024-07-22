@@ -14,6 +14,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
 app.config['UPLOAD_FOLDER'] = 'uploads'  # Diretório onde as imagens serão salvas
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
+
 bcrypt = Bcrypt(app)
 
 # Conexão com o banco de dados
@@ -145,7 +146,6 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
-
 # Rotas para Cliente (exemplo)
 @app.route('/clientes', methods=['GET'])
 @validar_token
@@ -158,6 +158,7 @@ def get_clientes(current_user):
         output = []
         for cliente in clientes:
             id_cliente, nome, email, telefone, ativo, tentativas_login, senha = cliente
+
             cliente_data = {
                 'id_cliente': id_cliente,
                 'nome': nome,
@@ -183,8 +184,8 @@ def get_cliente(id_cliente, current_user):
 
         if not cliente:
             return jsonify({'message': 'Cliente não encontrado'}), 404
-
         id_cliente, nome, email, telefone, ativo, tentativas_login, senha = cliente
+
         cliente_data = {
             'id_cliente': id_cliente,
             'nome': nome,
@@ -212,6 +213,7 @@ def create_cliente():
         cursor = con.cursor()
         cursor.execute("INSERT INTO CLIENTE (NOME, EMAIL, TELEFONE, ATIVO , TENTATIVAS_LOGIN, SENHA) VALUES (?, ?, ?, ?, ?, ?)",
                        (data['nome'], data['email'], data['telefone'], data['ativo'], tentativas_login, hashed_password))
+
         con.commit()
 
         return jsonify({'message': 'Novo cliente criado com sucesso!'}), 201
@@ -219,6 +221,7 @@ def create_cliente():
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
+
 @app.route('/cliente/<int:id_cliente>', methods=['PUT'])
 def update_cliente(id_cliente):
     data = request.get_json()
@@ -230,9 +233,9 @@ def update_cliente(id_cliente):
 
         if not cliente:
             return jsonify({'message': 'Cliente não encontrado'}), 404
-
         cursor.execute("UPDATE CLIENTE SET NOME=?, EMAIL=?, TELEFONE=?, ATIVO=? WHERE ID_CLIENTE=?",
                        (data['nome'], data['email'], data['telefone'], data['ativo'], id_cliente))
+
         con.commit()
 
         return jsonify({'message': 'Cliente atualizado com sucesso!'})
@@ -240,6 +243,7 @@ def update_cliente(id_cliente):
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
+
 
 @app.route('/cliente/login', methods=['POST'])
 def login_cliente():
@@ -300,6 +304,7 @@ def get_profissionais(current_user):
         output = []
         for profissional in profissionais:
             id_profissional, nome, telefone, ativo = profissional
+
             profissional_data = {
                 'id_profissional': id_profissional,
                 'nome': nome,
@@ -346,8 +351,8 @@ def get_profissional(id_profissional, current_user):
 
         if not profissional:
             return jsonify({'message': 'Profissional não encontrado'}), 404
-
         id_profissional, nome, telefone, ativo = profissional
+
         profissional_data = {
             'id_profissional': id_profissional,
             'nome': nome,
@@ -368,6 +373,7 @@ def create_profissional(current_user):
         cursor = con.cursor()
         cursor.execute("INSERT INTO PROFISSIONAL (NOME, TELEFONE, ATIVO) VALUES (?, ?, ?)",
                        (data['nome'], data['telefone'], data['ativo']))
+
         con.commit()
 
         return jsonify({'message': 'Novo profissional criado com sucesso!'}), 201
@@ -388,9 +394,9 @@ def update_profissional(id_profissional, current_user):
 
         if not profissional:
             return jsonify({'message': 'Profissional não encontrado'}), 404
-
         cursor.execute("UPDATE PROFISSIONAL SET NOME=?, TELEFONE=? ATIVO=? WHERE ID_PROFISSIONAL=?",
                        (data['nome'], data['telefone'], data['ativo'], id_profissional))
+
         con.commit()
 
         return jsonify({'message': 'Profissional atualizado com sucesso!'})
@@ -523,6 +529,7 @@ def create_servico():
         file.save(file_path)
 
         return jsonify({'message': 'Serviço criado com sucesso!', 'file_path': file_path}), 201
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -543,6 +550,7 @@ def update_servico(id_servico, current_user):
 
         cursor.execute("UPDATE SERVICO SET NOME=?, DESCRICAO=?, VALOR=?, TEMPO=?, ATIVO=? WHERE ID_SERVICO=?",
                        (data['nome'], data['descricao'], data['valor'], data['tempo'], data['ativo'], id_servico))
+
         con.commit()
 
         return jsonify({'message': 'Serviço atualizado com sucesso!'})

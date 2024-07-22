@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="Black">
+<<<<<<< HEAD
     <option name="sdkName" value="Python 3.12 (api_agenda)" />
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (api_agenda)" project-jdk-type="Python SDK" />
+=======
+    <option name="sdkName" value="Python 3.12 (firebirteste)" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (firebirteste)" project-jdk-type="Python SDK" />
+>>>>>>> 7eaf3b0aa906a37a5e4349991286883031f2a56b
 </project>
