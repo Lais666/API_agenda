@@ -1,5 +1,6 @@
 import fdb
 
+
 class Usuario:
     def __init__(self, id_usuario, nome, email, telefone, ativo, tentativas_login, adminstrador, senha):
         self.id_usuario = id_usuario
@@ -8,7 +9,7 @@ class Usuario:
         self.telefone = telefone
         self.ativo = ativo
         self.tentativas_login = tentativas_login
-        self.adminstrador = adminstrador
+        self.adminstrador = adminstrado
         self.senha = senha
 
 

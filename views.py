@@ -110,6 +110,7 @@ def profissional_disponivel(id_profissional, data_hora, id_servico):
         cursor.close()
 
 
+
 def verificar_disponibilidade(data_hora, id_servico):
     """
     Executa o procedimento armazenado PROFISSIONALDISPONIVEL e retorna os resultados.
@@ -182,6 +183,7 @@ def get_usuarios(current_user):
         usuarios = cursor.fetchall()
 
         output = []
+
         for usuario in usuarios:
             id_usuario, nome, email, telefone, ativo, tentativas_login, administrador, senha = usuario
 
@@ -206,7 +208,6 @@ def get_usuario(id_usuario):
         cursor = con.cursor()
         cursor.execute("SELECT * FROM usuario WHERE ID_usuario=?", (id_usuario,))
         usuario = cursor.fetchone()
-
         if not usuario:
             return jsonify({'message': 'usuario não encontrado'}), 404
         id_usuario, nome, email, telefone, ativo, tentativas_login, administrador, senha = usuario
@@ -258,10 +259,12 @@ def update_usuario(id_usuario):
         cursor.execute("SELECT * FROM usuario WHERE ID_usuario=?", (id_usuario,))
         usuario = cursor.fetchone()
 
+
         if not usuario:
             return jsonify({'message': 'usuario não encontrado'}), 404
         cursor.execute("UPDATE usuario SET NOME=?, EMAIL=?, TELEFONE=?, ATIVO=?, ADMINISTRADOR=? WHERE ID_usuario=?",
                        (data['nome'], data['email'], data['telefone'], data['ativo'], data['administrador'], id_usuario))
+
 
         con.commit()
 
@@ -270,6 +273,7 @@ def update_usuario(id_usuario):
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
+
 
 
 @app.route('/usuario/login', methods=['POST'])
@@ -281,27 +285,38 @@ def login_usuario():
     if not email or not senha:
         return jsonify({'error': 'Email e senha são obrigatórios.'}), 400
 
+
+    if not email or not senha:
+        return jsonify({'error': 'Email e senha são obrigatórios.'}), 400
+
+    cursor = None
     try:
         cursor = con.cursor()
+
         cursor.execute("SELECT ID_usuario, SENHA, TENTATIVAS_LOGIN, ATIVO FROM usuario WHERE EMAIL=?", (email,))
         usuario = cursor.fetchone()
 
         if usuario:
             id_usuario, senha_hash, tentativas_login, ativo = usuario
 
+
+
             if ativo == 0:
                 return jsonify({'error': 'Conta inativa. Entre em contato com o suporte.'}), 403
 
             if bcrypt.check_password_hash(senha_hash, senha):
                 # Resetar tentativas de login em caso de sucesso
+
                 cursor.execute("UPDATE usuario SET TENTATIVAS_LOGIN = 0 WHERE ID_usuario=?", (id_usuario,))
                 con.commit()
                 token = gerar_token(id_usuario)
+
                 return jsonify({'message': 'Login bem-sucedido!', 'token': token}), 200
             else:
                 # Incrementar contagem de tentativas falhas
                 tentativas_login += 1
                 if tentativas_login >= 3:
+
                     cursor.execute("UPDATE usuario SET ATIVO = false, TENTATIVAS_LOGIN = ? WHERE ID_usuario=?",
                                    (tentativas_login, id_usuario))
                     con.commit()
@@ -309,6 +324,7 @@ def login_usuario():
                 else:
                     cursor.execute("UPDATE usuario SET TENTATIVAS_LOGIN = ? WHERE ID_usuario=?",
                                    (tentativas_login, id_usuario))
+
                     con.commit()
                     return jsonify({'error': 'Senha incorreta. Tente novamente.'}), 401
         else:
@@ -316,7 +332,8 @@ def login_usuario():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
 
 @app.route('/profissionais', methods=['GET'])
 @validar_token
@@ -364,6 +381,7 @@ def profissionais_disponiveis():
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
 
+
 @app.route('/profissional/<int:id_profissional>', methods=['GET'])
 @validar_token
 def get_profissional(id_profissional, current_user):
@@ -396,7 +414,9 @@ def create_profissional(current_user):
     try:
         cursor = con.cursor()
         cursor.execute("INSERT INTO PROFISSIONAL (NOME, TELEFONE, ATIVO) VALUES (?, ?, ?)",
+
                        (data['nome'], data['telefone'], ativo))
+
 
         con.commit()
 
@@ -419,7 +439,9 @@ def update_profissional(id_profissional, current_user):
 
         if not profissional:
             return jsonify({'message': 'Profissional não encontrado'}), 404
+
         cursor.execute("UPDATE PROFISSIONAL SET NOME=?, TELEFONE=?, ATIVO=? WHERE ID_PROFISSIONAL=?",
+
                        (data['nome'], data['telefone'], data['ativo'], id_profissional))
 
         con.commit()
@@ -552,6 +574,7 @@ def create_servico(current_user):
             return jsonify({'message': 'Serviço criado com sucesso!', 'file_path': file_path}), 201
         else:
             return jsonify({'message': 'Serviço criado com sucesso, mas sem arquivo associado!'}), 201
+
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
