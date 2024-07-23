@@ -1,31 +1,37 @@
 import fdb
 
-class Cliente:
-    def __init__(self, id_cliente, nome, email, telefone, senha):
-        self.id_cliente = id_cliente
+class Usuario:
+    def __init__(self, id_usuario, nome, email, telefone, ativo, tentativas_login, adminstrador, senha):
+        self.id_usuario = id_usuario
         self.nome = nome
         self.email = email
         self.telefone = telefone
+        self.ativo = ativo
+        self.tentativas_login = tentativas_login
+        self.adminstrador = adminstrador
         self.senha = senha
 
+
 class Profissional:
-    def __init__(self, id_profissional, nome, telefone):
+    def __init__(self, id_profissional, nome, telefone, ativo):
         self.id_profissional = id_profissional
         self.nome = nome
         self.telefone = telefone
+        self.ativo = ativo
 
 class Servico:
-    def __init__(self, id_servico, nome, descricao, valor, tempo):
+    def __init__(self, id_servico, nome, descricao, valor, tempo, ativo):
         self.id_servico = id_servico
         self.nome = nome
         self.descricao = descricao
         self.valor = valor
         self.tempo = tempo
+        self.ativo = ativo
 
 class Agenda:
-    def __init__(self, id_agenda, id_cliente, id_profissional, id_servico, data_hora, status):
+    def __init__(self, id_agenda, id_usuario, id_profissional, id_servico, data_hora, status):
         self.id_agenda = id_agenda
-        self.id_cliente = id_cliente
+        self.id_usuario = id_usuario
         self.id_profissional = id_profissional
         self.id_servico = id_servico
         self.data_hora = data_hora

@@ -2,13 +2,19 @@ from flask import Flask, request, jsonify
 from flask_bcrypt import Bcrypt
 import fdb
 from config import DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
-from models import Cliente, Profissional, Servico, Agenda, HorarioProfissional, Parametro, ProfissionalServico
+from models import Usuario, Profissional, Servico, Agenda, HorarioProfissional, Parametro, ProfissionalServico
 import jwt
 from functools import wraps
 from datetime import datetime, timedelta, time
+from werkzeug.utils import secure_filename
+import os
+
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['UPLOAD_FOLDER'] = 'uploads'  # Diretório onde as imagens serão salvas
+app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
+
 bcrypt = Bcrypt(app)
 
 # Conexão com o banco de dados
@@ -23,11 +29,11 @@ try:
 except Exception as e:
     print(f"Erro ao conectar ao banco de dados: {e}")
 
-def gerar_token(cliente_id):
+def gerar_token(usuario_id):
     payload = {
         'exp': datetime.utcnow() + timedelta(hours=1),
         'iat': datetime.utcnow(),
-        'sub': cliente_id
+        'sub': usuario_id
     }
     return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
 def remover_prefixo_bearer(token):
@@ -59,6 +65,28 @@ def validar_token(f):
 
     return decorated_function
 
+def verificar_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        current_user = kwargs.get('current_user')
+        if not current_user:
+            return jsonify({'erro': 'Usuário não autenticado.'}), 401
+
+        try:
+            cursor = con.cursor()
+            cursor.execute("SELECT ADMINISTRADOR FROM usuario WHERE ID_usuario=?", (current_user,))
+            result = cursor.fetchone()
+
+            if not result or result[0] != 1:
+                return jsonify({'erro': 'Acesso negado. Usuário não é administrador.'}), 403
+
+            return f(*args, **kwargs)
+
+        except Exception as e:
+            return jsonify({'erro': str(e)}), 500
+
+    return decorated_function
+
 
 def profissional_disponivel(id_profissional, data_hora, id_servico):
     try:
@@ -82,112 +110,209 @@ def profissional_disponivel(id_profissional, data_hora, id_servico):
         cursor.close()
 
 
-# Rotas para Cliente (exemplo)
-@app.route('/clientes', methods=['GET'])
-@validar_token
-def get_clientes(current_user):
+def verificar_disponibilidade(data_hora, id_servico):
+    """
+    Executa o procedimento armazenado PROFISSIONALDISPONIVEL e retorna os resultados.
+
+    :param data_hora: A data e hora para verificar a disponibilidade.
+    :param id_servico: O ID do serviço para verificar a disponibilidade.
+    :return: Lista de dicionários com as informações dos profissionais e sua disponibilidade.
+    """
     try:
         cursor = con.cursor()
-        cursor.execute("SELECT * FROM CLIENTE")
-        clientes = cursor.fetchall()
+
+        dt = datetime.strptime(data_hora, '%d-%m-%Y %H:%M:%S')
+
+        # Chamada do procedimento armazenado
+        cursor.callproc('PROFISSIONALDISPONIVEL', (dt, id_servico))
+        # Buscar resultados
+        resultados = cursor.fetchall()
+
+        # Preparar resposta
+        resposta = []
+        for linha in resultados:
+            resposta.append({
+                'ID_PROFISSIONAL': linha.ID_PROFISSIONAL,
+                'NOME_PROFISSIONAL': linha.NOME_PROFISSIONAL
+            })
+
+        return resposta
+
+    except Exception as e:
+        print(f'Erro: {str(e)}')
+        return []
+
+    finally:
+        cursor.close()
+
+def validar_senha(senha):
+    if len(senha) < 8:
+        return False
+
+    tem_maiuscula = False
+    tem_minuscula = False
+    tem_numero = False
+    tem_caractere_especial = False
+    caracteres_especiais = "!@#$%^&*(),.?\":{}|<>"
+
+    for char in senha:
+        if char.isupper():
+            tem_maiuscula = True
+        elif char.islower():
+            tem_minuscula = True
+        elif char.isdigit():
+            tem_numero = True
+        elif char in caracteres_especiais:
+            tem_caractere_especial = True
+
+    return tem_maiuscula and tem_minuscula and tem_numero and tem_caractere_especial
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+
+# Rotas para usuario (exemplo)
+@app.route('/usuarios', methods=['GET'])
+@validar_token
+@verificar_admin
+def get_usuarios(current_user):
+    try:
+        cursor = con.cursor()
+        cursor.execute("SELECT * FROM usuario")
+        usuarios = cursor.fetchall()
 
         output = []
-        for cliente in clientes:
-            id_cliente, nome, email, telefone, senha = cliente
-            cliente_data = {
-                'id_cliente': id_cliente,
+        for usuario in usuarios:
+            id_usuario, nome, email, telefone, ativo, tentativas_login, administrador, senha = usuario
+
+            usuario_data = {
+                'id_usuario': id_usuario,
                 'nome': nome,
                 'email': email,
                 'telefone': telefone
                 # senha não deve ser retornada para segurança
             }
-            output.append(cliente_data)
+            output.append(usuario_data)
 
-        return jsonify({'clientes': output})
+        return jsonify({'usuarios': output})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
 
-@app.route('/cliente/<int:id_cliente>', methods=['GET'])
-@validar_token
-def get_cliente(id_cliente, current_user):
+@app.route('/usuario/<int:id_usuario>', methods=['GET'])
+def get_usuario(id_usuario):
     try:
         cursor = con.cursor()
-        cursor.execute("SELECT * FROM CLIENTE WHERE ID_CLIENTE=?", (id_cliente,))
-        cliente = cursor.fetchone()
+        cursor.execute("SELECT * FROM usuario WHERE ID_usuario=?", (id_usuario,))
+        usuario = cursor.fetchone()
 
-        if not cliente:
-            return jsonify({'message': 'Cliente não encontrado'}), 404
+        if not usuario:
+            return jsonify({'message': 'usuario não encontrado'}), 404
+        id_usuario, nome, email, telefone, ativo, tentativas_login, administrador, senha = usuario
 
-        id_cliente, nome, email, telefone, senha = cliente
-        cliente_data = {
-            'id_cliente': id_cliente,
+        usuario_data = {
+            'id_usuario': id_usuario,
             'nome': nome,
             'email': email,
             'telefone': telefone
             # senha não deve ser retornada para segurança
         }
-        return jsonify(cliente_data)
+        return jsonify(usuario_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
 
-@app.route('/cliente', methods=['POST'])
-def create_cliente():
+@app.route('/usuario', methods=['POST'])
+def create_usuario():
     data = request.get_json()
+    # Valida a senha
+    if not validar_senha(data['senha']):
+        return jsonify({
+                           'error': 'Senha inválida. A senha deve ter pelo menos 8 caracteres e incluir uma letra maiúscula, uma letra minúscula, um número e um caractere especial.'}), 400
+
     hashed_password = bcrypt.generate_password_hash(data['senha']).decode('utf-8')
-
+    tentativas_login = data.get('tentativas_login', 0)
+    ativo = data.get('ativo', 1)
+    adminstrador = data.get('administrador', 0)
     try:
         cursor = con.cursor()
-        cursor.execute("INSERT INTO CLIENTE (NOME, EMAIL, TELEFONE, SENHA) VALUES (?, ?, ?, ?)",
-                       (data['nome'], data['email'], data['telefone'], hashed_password))
+        cursor.execute("INSERT INTO usuario (NOME, EMAIL, TELEFONE, ATIVO , TENTATIVAS_LOGIN, ADMINISTRADOR, SENHA) VALUES (?, ?, ?, ?, ?, ?,?)",
+                       (data['nome'], data['email'], data['telefone'], ativo, tentativas_login, adminstrador, hashed_password))
+
         con.commit()
 
-        return jsonify({'message': 'Novo cliente criado com sucesso!'}), 201
+        return jsonify({'message': 'Novo usuario criado com sucesso!'}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
 
-@app.route('/cliente/<int:id_cliente>', methods=['PUT'])
-def update_cliente(id_cliente):
+@app.route('/usuario/<int:id_usuario>', methods=['PUT'])
+def update_usuario(id_usuario):
     data = request.get_json()
 
     try:
         cursor = con.cursor()
-        cursor.execute("SELECT * FROM CLIENTE WHERE ID_CLIENTE=?", (id_cliente,))
-        cliente = cursor.fetchone()
+        cursor.execute("SELECT * FROM usuario WHERE ID_usuario=?", (id_usuario,))
+        usuario = cursor.fetchone()
 
-        if not cliente:
-            return jsonify({'message': 'Cliente não encontrado'}), 404
+        if not usuario:
+            return jsonify({'message': 'usuario não encontrado'}), 404
+        cursor.execute("UPDATE usuario SET NOME=?, EMAIL=?, TELEFONE=?, ATIVO=?, ADMINISTRADOR=? WHERE ID_usuario=?",
+                       (data['nome'], data['email'], data['telefone'], data['ativo'], data['administrador'], id_usuario))
 
-        cursor.execute("UPDATE CLIENTE SET NOME=?, EMAIL=?, TELEFONE=? WHERE ID_CLIENTE=?",
-                       (data['nome'], data['email'], data['telefone'], id_cliente))
         con.commit()
 
-        return jsonify({'message': 'Cliente atualizado com sucesso!'})
+        return jsonify({'message': 'usuario atualizado com sucesso!'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
-# Rota para login do cliente
-@app.route('/cliente/login', methods=['POST'])
-def login_cliente():
+
+
+@app.route('/usuario/login', methods=['POST'])
+def login_usuario():
     auth_data = request.get_json()
+    email = auth_data.get('email')
+    senha = auth_data.get('senha')
+
+    if not email or not senha:
+        return jsonify({'error': 'Email e senha são obrigatórios.'}), 400
 
     try:
         cursor = con.cursor()
-        cursor.execute("SELECT * FROM CLIENTE WHERE EMAIL=?", (auth_data['email'],))
-        cliente = cursor.fetchone()
+        cursor.execute("SELECT ID_usuario, SENHA, TENTATIVAS_LOGIN, ATIVO FROM usuario WHERE EMAIL=?", (email,))
+        usuario = cursor.fetchone()
 
-        if cliente and bcrypt.check_password_hash(cliente[4], auth_data['senha']):
-            token = gerar_token(cliente[0])
-            # Retornar o token diretamente como string, sem decodificação
-            return jsonify({'message': 'Login bem-sucedido!', 'token': token}), 200
+        if usuario:
+            id_usuario, senha_hash, tentativas_login, ativo = usuario
+
+            if ativo == 0:
+                return jsonify({'error': 'Conta inativa. Entre em contato com o suporte.'}), 403
+
+            if bcrypt.check_password_hash(senha_hash, senha):
+                # Resetar tentativas de login em caso de sucesso
+                cursor.execute("UPDATE usuario SET TENTATIVAS_LOGIN = 0 WHERE ID_usuario=?", (id_usuario,))
+                con.commit()
+                token = gerar_token(id_usuario)
+                return jsonify({'message': 'Login bem-sucedido!', 'token': token}), 200
+            else:
+                # Incrementar contagem de tentativas falhas
+                tentativas_login += 1
+                if tentativas_login >= 3:
+                    cursor.execute("UPDATE usuario SET ATIVO = false, TENTATIVAS_LOGIN = ? WHERE ID_usuario=?",
+                                   (tentativas_login, id_usuario))
+                    con.commit()
+                    return jsonify({'error': 'Número máximo de tentativas de login excedido. Sua conta foi desativada.'}), 403
+                else:
+                    cursor.execute("UPDATE usuario SET TENTATIVAS_LOGIN = ? WHERE ID_usuario=?",
+                                   (tentativas_login, id_usuario))
+                    con.commit()
+                    return jsonify({'error': 'Senha incorreta. Tente novamente.'}), 401
         else:
-            return jsonify({'message': 'Credenciais inválidas'}), 401
+            return jsonify({'error': 'Email não encontrado.'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -195,6 +320,7 @@ def login_cliente():
 
 @app.route('/profissionais', methods=['GET'])
 @validar_token
+@verificar_admin
 def get_profissionais(current_user):
     try:
         cursor = con.cursor()
@@ -203,11 +329,13 @@ def get_profissionais(current_user):
 
         output = []
         for profissional in profissionais:
-            id_profissional, nome, telefone = profissional
+            id_profissional, nome, telefone, ativo = profissional
+
             profissional_data = {
                 'id_profissional': id_profissional,
                 'nome': nome,
-                'telefone': telefone
+                'telefone': telefone,
+                'ativo': ativo
             }
             output.append(profissional_data)
 
@@ -217,6 +345,24 @@ def get_profissionais(current_user):
     finally:
         cursor.close()
 
+
+@app.route('/profissionais_disponiveis', methods=['GET'])
+def profissionais_disponiveis():
+    data_hora = request.args.get('data_hora')
+    id_servico = request.args.get('id_servico', type=int)
+
+    if not data_hora or id_servico is None:
+        return jsonify({'erro': 'Parâmetros ausentes'}), 400
+
+    try:
+
+        dt = datetime.strptime(data_hora, '%d-%m-%Y %H:%M:%S')
+        # Chama a função que executa o procedimento armazenado
+        disponibilidade = verificar_disponibilidade(dt, id_servico)
+        return jsonify(disponibilidade)
+
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
 
 @app.route('/profissional/<int:id_profissional>', methods=['GET'])
 @validar_token
@@ -228,8 +374,8 @@ def get_profissional(id_profissional, current_user):
 
         if not profissional:
             return jsonify({'message': 'Profissional não encontrado'}), 404
+        id_profissional, nome, telefone, ativo = profissional
 
-        id_profissional, nome, telefone = profissional
         profissional_data = {
             'id_profissional': id_profissional,
             'nome': nome,
@@ -243,13 +389,15 @@ def get_profissional(id_profissional, current_user):
 
 @app.route('/profissional', methods=['POST'])
 @validar_token
+@verificar_admin
 def create_profissional(current_user):
     data = request.get_json()
-
+    ativo = data.get('ativo', 1)
     try:
         cursor = con.cursor()
-        cursor.execute("INSERT INTO PROFISSIONAL (NOME, TELEFONE) VALUES (?, ?)",
-                       (data['nome'], data['telefone']))
+        cursor.execute("INSERT INTO PROFISSIONAL (NOME, TELEFONE, ATIVO) VALUES (?, ?, ?)",
+                       (data['nome'], data['telefone'], ativo))
+
         con.commit()
 
         return jsonify({'message': 'Novo profissional criado com sucesso!'}), 201
@@ -260,6 +408,7 @@ def create_profissional(current_user):
 
 @app.route('/profissional/<int:id_profissional>', methods=['PUT'])
 @validar_token
+@verificar_admin
 def update_profissional(id_profissional, current_user):
     data = request.get_json()
 
@@ -270,9 +419,9 @@ def update_profissional(id_profissional, current_user):
 
         if not profissional:
             return jsonify({'message': 'Profissional não encontrado'}), 404
+        cursor.execute("UPDATE PROFISSIONAL SET NOME=?, TELEFONE=?, ATIVO=? WHERE ID_PROFISSIONAL=?",
+                       (data['nome'], data['telefone'], data['ativo'], id_profissional))
 
-        cursor.execute("UPDATE PROFISSIONAL SET NOME=?, TELEFONE=? WHERE ID_PROFISSIONAL=?",
-                       (data['nome'], data['telefone'], id_profissional))
         con.commit()
 
         return jsonify({'message': 'Profissional atualizado com sucesso!'})
@@ -283,6 +432,7 @@ def update_profissional(id_profissional, current_user):
 
 @app.route('/profissional/<int:id_profissional>', methods=['DELETE'])
 @validar_token
+@verificar_admin
 def delete_profissional(id_profissional, current_user):
     try:
         cursor = con.cursor()
@@ -303,8 +453,7 @@ def delete_profissional(id_profissional, current_user):
 
 # Rotas para Serviço
 @app.route('/servicos', methods=['GET'])
-@validar_token
-def get_servicos(current_user):
+def get_servicos():
     try:
         cursor = con.cursor()
         cursor.execute("SELECT * FROM SERVICO")
@@ -312,7 +461,7 @@ def get_servicos(current_user):
 
         output = []
         for servico in servicos:
-            id_servico, nome, descricao, valor, tempo = servico
+            id_servico, nome, descricao, valor, tempo, ativo = servico
 
             # Converter o tempo para string no formato HH:MM:SS
             if tempo and isinstance(tempo, time):
@@ -325,7 +474,8 @@ def get_servicos(current_user):
                 'nome': nome,
                 'descricao': descricao,
                 'valor': valor,
-                'tempo': tempo_str
+                'tempo': tempo_str,
+                'ativo': ativo
             }
             output.append(servico_data)
 
@@ -336,8 +486,7 @@ def get_servicos(current_user):
         cursor.close()
 
 @app.route('/servico/<int:id_servico>', methods=['GET'])
-@validar_token
-def get_servico(id_servico, current_user):
+def get_servico(id_servico):
     try:
         cursor = con.cursor()
         cursor.execute("SELECT * FROM SERVICO WHERE ID_SERVICO=?", (id_servico,))
@@ -346,7 +495,7 @@ def get_servico(id_servico, current_user):
         if not servico:
             return jsonify({'message': 'Serviço não encontrado'}), 404
 
-        id_servico, nome, descricao, valor, tempo = servico
+        id_servico, nome, descricao, valor, tempo, ativo = servico
         # Converter o tempo para string no formato HH:MM:SS
         if tempo and isinstance(tempo, time):
             tempo_str = tempo.strftime('%H:%M:%S')
@@ -366,25 +515,53 @@ def get_servico(id_servico, current_user):
     finally:
         cursor.close()
 
+
 @app.route('/servico', methods=['POST'])
 @validar_token
+@verificar_admin
 def create_servico(current_user):
+    # Obter dados adicionais do serviço
     data = request.get_json()
+    ativo = data.get('ativo', 1)
+
+    file = request.files.get('file')
+    if file and file.filename:
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
 
     try:
         cursor = con.cursor()
-        cursor.execute("INSERT INTO SERVICO (NOME, DESCRICAO, VALOR, TEMPO) VALUES (?, ?, ?, ?)",
-                       (data['nome'], data['descricao'], data['valor'], data['tempo']))
+
+        # Inserir dados do serviço no banco
+        cursor.execute("""
+              INSERT INTO SERVICO (NOME, DESCRICAO, VALOR, TEMPO, ATIVO) 
+              VALUES (?, ?, ?, ?, ?)
+          """, (data['nome'], data['descricao'], data['valor'], data['tempo'], ativo))
         con.commit()
 
-        return jsonify({'message': 'Novo serviço criado com sucesso!'}), 201
+        # Obter o ID do serviço inserido
+        cursor.execute("SELECT GEN_ID(GEN_SERVICO_ID, 0) FROM RDB$DATABASE")
+        id_servico = cursor.fetchone()[0]
+
+        if file:
+            # Salvar o arquivo com o ID do serviço
+            file_extension = file.filename.rsplit('.', 1)[1].lower()
+            filename = f"servico_{id_servico}.{file_extension}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            return jsonify({'message': 'Serviço criado com sucesso!', 'file_path': file_path}), 201
+        else:
+            return jsonify({'message': 'Serviço criado com sucesso, mas sem arquivo associado!'}), 201
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
         cursor.close()
 
+
 @app.route('/servico/<int:id_servico>', methods=['PUT'])
 @validar_token
+@verificar_admin
 def update_servico(id_servico, current_user):
     data = request.get_json()
 
@@ -396,8 +573,9 @@ def update_servico(id_servico, current_user):
         if not servico:
             return jsonify({'message': 'Serviço não encontrado'}), 404
 
-        cursor.execute("UPDATE SERVICO SET NOME=?, DESCRICAO=?, VALOR=?, TEMPO=? WHERE ID_SERVICO=?",
-                       (data['nome'], data['descricao'], data['valor'], data['tempo'], id_servico))
+        cursor.execute("UPDATE SERVICO SET NOME=?, DESCRICAO=?, VALOR=?, TEMPO=?, ATIVO=? WHERE ID_SERVICO=?",
+                       (data['nome'], data['descricao'], data['valor'], data['tempo'], data['ativo'], id_servico))
+
         con.commit()
 
         return jsonify({'message': 'Serviço atualizado com sucesso!'})
@@ -408,6 +586,7 @@ def update_servico(id_servico, current_user):
 
 @app.route('/servico/<int:id_servico>', methods=['DELETE'])
 @validar_token
+@verificar_admin
 def delete_servico(id_servico, current_user):
     try:
         cursor = con.cursor()
@@ -437,10 +616,10 @@ def get_agendas(current_user):
 
         output = []
         for agenda in agendas:
-            id_agenda, id_cliente, id_profissional, id_servico, data_hora, status = agenda
+            id_agenda, id_usuario, id_profissional, id_servico, data_hora, status = agenda
             agenda_data = {
                 'id_agenda': id_agenda,
-                'id_cliente': id_cliente,
+                'id_usuario': id_usuario,
                 'id_profissional': id_profissional,
                 'id_servico': id_servico,
                 'data_hora': data_hora.strftime('%Y-%m-%d %H:%M:%S'),
@@ -456,6 +635,7 @@ def get_agendas(current_user):
 
 @app.route('/agenda/<int:id_agenda>', methods=['GET'])
 @validar_token
+@verificar_admin
 def get_agenda(id_agenda, current_user):
     try:
         cursor = con.cursor()
@@ -465,10 +645,10 @@ def get_agenda(id_agenda, current_user):
         if not agenda:
             return jsonify({'message': 'Agenda não encontrada'}), 404
 
-        id_agenda, id_cliente, id_profissional, id_servico, data_hora, status = agenda
+        id_agenda, id_usuario, id_profissional, id_servico, data_hora, status = agenda
         agenda_data = {
             'id_agenda': id_agenda,
-            'id_cliente': id_cliente,
+            'id_usuario': id_usuario,
             'id_profissional': id_profissional,
             'id_servico': id_servico,
             'data_hora': data_hora.strftime('%Y-%m-%d %H:%M:%S'),
@@ -486,7 +666,7 @@ def create_agenda(current_user):
 
     # Converter data_hora para datetime
     data_hora = datetime.strptime(data['data_hora'], '%Y-%m-%d %H:%M:%S')
-
+    status = data.get('status', 1)
     # Verificar disponibilidade do profissional
     if not profissional_disponivel(data['id_profissional'], data_hora, data['id_servico']):
         return jsonify({'message': 'Profissional não está disponível neste horário'}), 400
@@ -494,14 +674,14 @@ def create_agenda(current_user):
     try:
         cursor = con.cursor()
         cursor.execute("""
-            INSERT INTO AGENDA (ID_CLIENTE, ID_PROFISSIONAL, ID_SERVICO, DATA_HORA, STATUS) 
+            INSERT INTO AGENDA (ID_usuario, ID_PROFISSIONAL, ID_SERVICO, DATA_HORA, STATUS) 
             VALUES (?, ?, ?, ?, ?)
         """, (
-            data['id_cliente'],
+            data['id_usuario'],
             data['id_profissional'],
             data['id_servico'],
             data_hora,  # Certifique-se de que data_hora seja um objeto datetime
-            data['status']
+            status
         ))
         con.commit()
 
@@ -513,6 +693,7 @@ def create_agenda(current_user):
 
 @app.route('/agenda/<int:id_agenda>', methods=['PUT'])
 @validar_token
+@verificar_admin
 def update_agenda(id_agenda, current_user):
     data = request.get_json()
 
@@ -533,10 +714,10 @@ def update_agenda(id_agenda, current_user):
 
         cursor.execute("""
             UPDATE AGENDA 
-            SET ID_CLIENTE=?, ID_PROFISSIONAL=?, ID_SERVICO=?, DATA_HORA=?, STATUS=? 
+            SET ID_usuario=?, ID_PROFISSIONAL=?, ID_SERVICO=?, DATA_HORA=?, STATUS=? 
             WHERE ID_AGENDA=?
         """, (
-            data['id_cliente'],
+            data['id_usuario'],
             data['id_profissional'],
             data['id_servico'],
             data_hora,  # Certifique-se de que data_hora seja um objeto datetime
@@ -552,6 +733,7 @@ def update_agenda(id_agenda, current_user):
         cursor.close()
 @app.route('/agenda/<int:id_agenda>', methods=['DELETE'])
 @validar_token
+@verificar_admin
 def delete_agenda(id_agenda, current_user):
     try:
         cursor = con.cursor()
@@ -575,6 +757,7 @@ def delete_agenda(id_agenda, current_user):
 # Rota para manipulação da tabela PROFISSIONAL_SERVICO
 @app.route('/profissional_servico', methods=['GET'])
 @validar_token
+@verificar_admin
 def get_profissional_servico(current_user):
     try:
         cursor = con.cursor()
@@ -598,6 +781,7 @@ def get_profissional_servico(current_user):
 
 @app.route('/profissional_servico/<int:id_profissional>/<int:id_servico>', methods=['GET'])
 @validar_token
+@verificar_admin
 def get_profissional_servico_by_ids(id_profissional, id_servico, current_user):
     try:
         cursor = con.cursor()
@@ -620,6 +804,7 @@ def get_profissional_servico_by_ids(id_profissional, id_servico, current_user):
 
 @app.route('/profissional_servico', methods=['POST'])
 @validar_token
+@verificar_admin
 def create_profissional_servico(current_user):
     try:
         data = request.get_json()
@@ -641,6 +826,7 @@ def create_profissional_servico(current_user):
 
 @app.route('/profissional_servico/<int:id_profissional>/<int:id_servico>', methods=['PUT'])
 @validar_token
+@verificar_admin
 def update_profissional_servico(id_profissional, id_servico, current_user):
     try:
         data = request.get_json()
@@ -657,6 +843,7 @@ def update_profissional_servico(id_profissional, id_servico, current_user):
 
 @app.route('/profissional_servico/<int:id_profissional>/<int:id_servico>', methods=['DELETE'])
 @validar_token
+@verificar_admin
 def delete_profissional_servico(id_profissional, id_servico, current_user):
     try:
         cursor = con.cursor()
@@ -671,6 +858,7 @@ def delete_profissional_servico(id_profissional, id_servico, current_user):
 
 @app.route('/horario_profissional/<int:id_profissional>', methods=['GET'])
 @validar_token
+@verificar_admin
 def get_horario_profissional(id_profissional, current_user):
     try:
         cursor = con.cursor()
@@ -705,6 +893,7 @@ def get_horario_profissional(id_profissional, current_user):
 
 @app.route('/horario_profissional', methods=['POST'])
 @validar_token
+@verificar_admin
 def create_horario_profissional(current_user):
     try:
         data = request.get_json()
@@ -740,6 +929,7 @@ def create_horario_profissional(current_user):
 
 @app.route('/horario_profissional/<int:id_horario>', methods=['PUT'])
 @validar_token
+@verificar_admin
 def update_horario_profissional(id_horario, current_user):
     try:
         data = request.get_json()
@@ -762,6 +952,7 @@ def update_horario_profissional(id_horario, current_user):
 
 @app.route('/horario_profissional/<int:id_horario>', methods=['DELETE'])
 @validar_token
+@verificar_admin
 def delete_horario_profissional(id_horario, current_user):
     try:
         cursor = con.cursor()

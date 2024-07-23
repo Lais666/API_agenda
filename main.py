@@ -1,6 +1,6 @@
 from flask import Flask
 import fdb  # Importe o módulo fdb para Firebird
-from models import Cliente, Profissional, Servico, Agenda, HorarioProfissional, Parametro  # Importe suas classes de modelo
+from models import Usuario, Profissional, Servico, Agenda, HorarioProfissional, Parametro  # Importe suas classes de modelo
 
 app = Flask(__name__)
 app.config.from_pyfile('config.py')
