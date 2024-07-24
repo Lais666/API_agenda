@@ -123,9 +123,10 @@ def verificar_disponibilidade(data_hora, id_servico):
         cursor = con.cursor()
 
         dt = datetime.strptime(data_hora, '%d-%m-%Y %H:%M:%S')
+        dt_formatado = dt.strftime('%d.%m.%Y %H:%M:%S')
 
         # Chamada do procedimento armazenado
-        cursor.callproc('PROFISSIONALDISPONIVEL', (dt, id_servico))
+        cursor.callproc('PROFISSIONALDISPONIVEL', (dt_formatado, id_servico))
         # Buscar resultados
         resultados = cursor.fetchall()
 
